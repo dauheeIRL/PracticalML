@@ -1,5 +1,5 @@
 ---
-title: "Practical machine learning project from Coursara"
+title: "Practical machine learning project from Coursera"
 author: "Dauhee"
 date: "22 August 2017"
 output: html_document
@@ -21,6 +21,7 @@ library(doParallel)
 ## Project Goal
 
 The goal of this project is to predict the manner in which a number of test subjects performed a dumbbell curl exercise. There is a "classe" variable that indicates the particular manner executed:
+
 * exactly according to the specification (Class A)
 * throwing the elbows to the front (Class B)
 * lifting the dumbbell only halfway (Class C)
