@@ -1,0 +1,131 @@
+---
+title: "Practical machine learning project from Coursara"
+author: "Dauhee"
+date: "22 August 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readr)
+library(caret)
+library(ggplot2)
+library(reshape2)
+library(mice)
+library(parallel)
+library(doParallel)
+
+```
+
+## Project Goal
+
+The goal of this project is to predict the manner in which a number of test subjects performed a dumbbell curl exercise. There is a "classe" variable that indicates the particular manner executed:
+* exactly according to the specification (Class A)
+* throwing the elbows to the front (Class B)
+* lifting the dumbbell only halfway (Class C)
+* lowering the dumbbell only halfway (Class D)
+* throwing the hips to the front (Class E)
+
+Cross validation must be used and explanations for choices made in the assignment. There are also 20 test dataset records to have the "classe" variable predicted. Comments have been put in-place with code to clarify choices and reasons
+
+
+```{r step1, results="hide"}
+suppressMessages(suppressWarnings(traindf <- read_csv("pml-training.csv", na=c("#DIV/0!", "NA", ""))))
+suppressMessages(suppressWarnings(testdf <- read_csv("pml-testing.csv", na=c("#DIV/0!", "NA", ""))))
+
+#get rid of index and also timestamp as time is static for each individual. Are presuming time of day has no 
+#impact on prediction. Removal of near zero values later would probably get rid of static timestamp also
+traindf <- subset(traindf, select = -c(X1, cvtd_timestamp))
+testdf <- subset(testdf, select = -c(X1, cvtd_timestamp))
+```
+
+```{r step2}
+#get columns that have nulls
+lst<- apply(traindf, 2, function(x) sum(is.na(x)) )
+#as can be seen, some columns have a very low amount of missing values. Include these in the model but impute 
+lst[lst>0]
+pct1 <- round((dim(traindf)[1]) / 100)
+
+#delete colums that have more than 1% missing
+traindf <- traindf[, !names(traindf) %in% names(lst[lst>pct1])]
+testdf <- testdf[, !names(testdf) %in% names(lst[lst>pct1])]
+
+#magnet sensor appears to have failed for just 1 row on the train data, none on test
+dim(traindf[rowSums(is.na(traindf)) > 0,])[1]
+dim(testdf[rowSums(is.na(testdf)) > 0,])[1]
+
+```
+
+## Inital investigation
+
+On the train dataset, there are a number of columns that are completely null. There are also some columns that are only missing 1 value. What we will do is exclude the completely null columns, and impute the remaining missing values. Instead of imputing, we could exclude the record with missing values as each record is a full test cycle, however I have decided to impute and showcase this capability.
+
+```{r inital}
+
+#seems like good mix of each classe for analysis
+table(traindf$classe)
+
+#data appears non-linear for many of the variables
+ggplot(data = melt(traindf), mapping = aes(x = value)) + 
+  geom_histogram(bins = 10) + facet_wrap(~variable, scales = 'free_x')
+
+#factorize classe as it is categorical
+traindf$classe = factor(traindf$classe)
+
+#remove variables that do not contribute to building model of prediction - i.e. static values
+nearZ <- nearZeroVar(traindf)
+traindf <- traindf[-nearZ, ]
+
+
+```
+
+
+## Model selection
+
+So there is a non-linear distribution of data for many of the variables. Our outcome is a classification type. This would indicate that random forest, generalized boosted regression model or linear discriminant analysis could be contenders. Because of random forest being deemed the heaveyweight of prediction accuracy, we will try that first. Then possibly doing a combined prediction to see if can get better accuracy.
+
+```{r model}
+
+#doing the following when testing impute fails due to standard deviation calculation not possible
+pPros <- preProcess(traindf, method="knnImpute", na.remove=FALSE)
+
+#now using a different method of computing, this time the mean, in order to salvage the 1 record
+trainDFImp <- mice(traindf, m=5, maxit=50, meth='mean', seed=500, printFlag = FALSE)
+trainDFImp<-complete(trainDFImp,1)
+
+#we have our full train dataset. Because of cross validation, will be computationally intensive so need to multi-thread
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+#begin the creation of the model using random forest
+mod1 <- train(classe ~ ., data=trainDFImp, trControl = trainControl(method="cv", number = 5, allowParallel = TRUE), method="rf")
+
+stopCluster(cluster)
+registerDoSEQ() #go back to single thread mode in R
+
+
+pred1 <- predict(mod1, trainDFImp)
+conf_mat <- confusionMatrix(pred1, trainDFImp$classe)
+conf_mat$table
+conf_mat$overall[[1]] * 100
+
+```
+
+## High accuracy of model
+
+Wow. We have a model accuracy prediction of 100% on our in-sample data. Looking at this, there is no need to continue tweaking with other methods or using combined models.
+
+```{r final}
+
+varImpObj <- varImp(mod1)
+plot(varImpObj, main = "Importance of Top 20 Variables", top = 20)
+
+#Finally, we predict on the test dataset
+pred2 <- predict(mod1, testdf)
+pred2
+```
+
+## Summary
+
+After completing the 20 sample quiz, it appears the model is 100% correct on out of sample test. It is interesting to see also the breakdown of the higher importance predictors as indicated in the plot. The cross validation using random forest turned out to be an excellent model for this data. No adjustments were required. This is always a good approach of less "tampering" with the model so that there are generally less out of sample errors encountered.

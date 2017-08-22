@@ -1,2 +1,2 @@
 # PracticalML
-Practical MAchine Learning
+Practical Machine Learning
